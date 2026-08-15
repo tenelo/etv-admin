@@ -1,0 +1,68 @@
+{
+  "project_info": {
+    "project_number": "322037753000",
+    "firebase_url": "https://app-etv-default-rtdb.europe-west1.firebasedatabase.app",
+    "project_id": "app-etv",
+    "storage_bucket": "app-etv.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:322037753000:android:dadd4dbd5f727912f6ce9d",
+        "android_client_info": {
+          "package_name": "com.app.etv"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyACJ4Pcvpyo3UV7Kd05vuA7YqlbpQPb6RA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:322037753000:android:3745088a6fb4fff5f6ce9d",
+        "android_client_info": {
+          "package_name": "com.app.etv_admin"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyACJ4Pcvpyo3UV7Kd05vuA7YqlbpQPb6RA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:322037753000:android:78c5d7efa5ed505ef6ce9d",
+        "android_client_info": {
+          "package_name": "com.example.etv"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyACJ4Pcvpyo3UV7Kd05vuA7YqlbpQPb6RA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(flutter create *)",
+      "Read(//c/Users/GTMS/AppData/Local/Temp/claude/d--App-Bloc-etv-admin/b81c2f89-c5e7-4a3d-88d5-afe0fd3d9fec/scratchpad/sdkcheck_tmp/ios/**)",
+      "Read(//c/Users/GTMS/AppData/Local/Temp/claude/d--App-Bloc-etv-admin/b81c2f89-c5e7-4a3d-88d5-afe0fd3d9fec/scratchpad/sdkcheck_tmp/ios/Runner.xcodeproj/**)",
+      "Bash(flutter pub *)"
+    ]
+  }
+}
