@@ -1,10 +1,10 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:etv_admin/config/config.dart';
 import 'package:etv_admin/mesfonctions/mesfonctions.dart';
 import 'package:etv_admin/models/models.dart';
+import 'package:etv_admin/services/api_client.dart';
 
 List<PlacesTickets> maListeDeTicketsVIP = [];
 
@@ -54,10 +54,9 @@ class _CarVIPState extends State<CarVIP> {
       });
 
     try {
-      final response = await http.post(
-        apiUri('placesAssises.php'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'documentId': widget.documentId}),
+      final response = await ApiClient.instance.post(
+        'placesAssises.php',
+        body: {'documentId': widget.documentId},
       );
 
       if (response.statusCode == 200) {
@@ -192,10 +191,12 @@ class _CarVIPState extends State<CarVIP> {
                                       _rangee2([13, 14]),
                                       _rangee2([9, 10]),
                                       _rangee2([5, 6]),
+                                      _rangee2([3, 4]),
+
                                       Padding(
                                         padding: const EdgeInsets.only(
                                           left: 10,
-                                          top: 10.0,
+                                          top: 15.0,
                                         ),
                                         child: porte(),
                                       ),
@@ -219,6 +220,7 @@ class _CarVIPState extends State<CarVIP> {
                                       _rangee2([15, 16]),
                                       _rangee2([11, 12]),
                                       _rangee2([7, 8]),
+                                      _rangee2([1, 2]),
                                       const SizedBox(height: 4),
                                       Row(
                                         children: [
@@ -313,9 +315,10 @@ class _PlacesVIPState extends State<PlacesVIP> {
     final bool petitEcran = w < 600;
     final double siegeSize = petitEcran ? w * 0.090 : w * 0.093;
 
-    final Color textColor = etat == "cliquable"
-        ? Colors.white
-        : const Color(0xFF006B3C);
+    // final Color textColor = etat == "cliquable"
+    //     ? Colors.white
+    //     : const Color(0xFF006B3C);
+    final Color textColor = Colors.white;
 
     if (maListeDeTicketsVIP.any((t) => t.place == widget.numero) &&
         etat == "nonCliquable") {
@@ -436,7 +439,7 @@ class _PlacesVIPState extends State<PlacesVIP> {
               color: Colors.white,
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.15),
+                  color: Colors.black.withValues(alpha: 0.15),
                   blurRadius: 20,
                   offset: const Offset(0, 10),
                 ),
@@ -518,7 +521,7 @@ class _PlacesVIPState extends State<PlacesVIP> {
                             color: const Color(0xFFE8F5E9),
                             borderRadius: BorderRadius.circular(30),
                             border: Border.all(
-                              color: _vipOr.withOpacity(0.5),
+                              color: _vipOr.withValues(alpha: 0.5),
                               width: 2,
                             ),
                           ),
@@ -604,7 +607,7 @@ class _PlacesVIPState extends State<PlacesVIP> {
         Container(
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: iconColor.withOpacity(0.1),
+            color: iconColor.withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(12),
           ),
           child: Icon(icon, color: iconColor, size: 22),

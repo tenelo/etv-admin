@@ -1,10 +1,9 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:etv_admin/config/config.dart';
-import 'package:etv_admin/mesfonctions/mesfonctions.dart';
+import 'package:etv_admin/services/api_client.dart';
 import 'package:etv_admin/graphiques/diagrammeABarres.dart';
 import 'package:etv_admin/graphiques/graphiqueAnnee.dart';
 import 'package:syncfusion_flutter_charts/charts.dart';
@@ -35,11 +34,24 @@ class _GraphiquesABarresMoisAnneeState
   final TextEditingController _dateController = TextEditingController();
   final TextEditingController _monthYearController = TextEditingController();
   final TextEditingController _yearController = TextEditingController();
+  // Controleurs d'AFFICHAGE uniquement (espaces au lieu d'underscores).
+  // _dateController/_monthYearController/_yearController restent la valeur
+  // TECHNIQUE (underscores), inchangee, utilisee pour la navigation vers
+  // l'ecran suivant (date:/moisAnnee:/annee: ci-dessous) et donc au final
+  // pour l'appel serveur de cet ecran-la.
+  final TextEditingController _dateAffichage = TextEditingController();
+  final TextEditingController _moisAnneeAffichage = TextEditingController();
+  final TextEditingController _anneeAffichage = TextEditingController();
   DateTime _selectedDate = DateTime.now();
   DateTime _selectedMonthYear = DateTime.now();
   DateTime _selectedYear = DateTime.now();
   final List<MesDonneesTickets> ticketsData = [];
   bool _isLoading = true;
+
+  // AFFICHAGE UNIQUEMENT : underscores -> espaces. La valeur technique
+  // (underscores) n'est jamais modifiee par cette fonction.
+  String _lisible(String valeurTechnique) =>
+      valeurTechnique.replaceAll('_', ' ');
 
   @override
   void initState() {
@@ -47,6 +59,9 @@ class _GraphiquesABarresMoisAnneeState
     _dateController.text = widget.date;
     _monthYearController.text = widget.moisAnnee;
     _yearController.text = widget.annee;
+    _dateAffichage.text = _lisible(widget.date);
+    _moisAnneeAffichage.text = _lisible(widget.moisAnnee);
+    _anneeAffichage.text = _lisible(widget.annee);
     _chargerTickets();
   }
 
@@ -56,20 +71,22 @@ class _GraphiquesABarresMoisAnneeState
     _dateController.dispose();
     _monthYearController.dispose();
     _yearController.dispose();
+    _dateAffichage.dispose();
+    _moisAnneeAffichage.dispose();
+    _anneeAffichage.dispose();
     super.dispose();
   }
 
   Future<void> _chargerTickets() async {
     if (mounted) setState(() => _isLoading = true);
     try {
-      final response = await http.post(
-        apiUri('graphiques.php'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
+      final response = await ApiClient.instance.post(
+        'graphiques.php',
+        body: {
           'type': 'moisAnnee',
           'moisAnnee': widget.moisAnnee,
           'gare': widget.gare,
-        }),
+        },
       );
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
@@ -157,14 +174,36 @@ class _GraphiquesABarresMoisAnneeState
           : SingleChildScrollView(
               child: Column(
                 children: [
-                  SizedBox(
+                  filteredTickets.isEmpty
+                      ? SizedBox(
+                          height: MediaQuery.of(context).size.height * 0.3,
+                          child: Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.bar_chart_outlined,
+                                    size: 48, color: Colors.grey[400]),
+                                const SizedBox(height: 12),
+                                Text(
+                                  'Aucune donnée pour ce mois',
+                                  style: TextStyle(
+                                      color: Colors.grey[600],
+                                      fontWeight: FontWeight.bold),
+                                ),
+                              ],
+                            ),
+                          ),
+                        )
+                      : SizedBox(
                     height: MediaQuery.of(context).size.height * 0.6,
                     child: SfCartesianChart(
                       primaryXAxis: const CategoryAxis(
                           labelStyle: TextStyle(fontWeight: FontWeight.bold)),
                       primaryYAxis: const NumericAxis(
-                          majorGridLines: MajorGridLines(width: 0),
-                          labelStyle: TextStyle(fontSize: 0)),
+                          majorGridLines: MajorGridLines(
+                              width: 0.5, color: Color(0xFFE0E0E0)),
+                          labelStyle: TextStyle(fontSize: 10),
+                          title: AxisTitle(text: 'Passagers')),
                       title: ChartTitle(
                           text:
                               'Répartition des passagers par destinations\npartants de ${widget.gare}',
@@ -172,16 +211,19 @@ class _GraphiquesABarresMoisAnneeState
                               fontSize: 14,
                               fontWeight: FontWeight.bold,
                               color: Config.colors.bleuA)),
-                      legend: const Legend(
-                          isVisible: true,
-                          textStyle: TextStyle(fontWeight: FontWeight.w900)),
+                      // Legende desactivee : une seule serie multicolore
+                      // (couleurs posees par pointColorMapper, pas par la
+                      // serie) -> une legende classique afficherait une
+                      // pastille ne correspondant a aucune barre. Le titre
+                      // porte deja le total.
+                      legend: const Legend(isVisible: false),
                       tooltipBehavior: TooltipBehavior(enable: true),
                       series: <CartesianSeries<MesDonneesTickets, String>>[
                         BarSeries<MesDonneesTickets, String>(
                           borderRadius: BorderRadius.circular(4),
                           sortingOrder: SortingOrder.descending,
                           name:
-                              'Total passagers ${widget.moisAnnee} : ${_getTotalPassagers()}',
+                              'Total passagers ${_lisible(widget.moisAnnee)} : ${_getTotalPassagers()}',
                           dataSource: filteredTickets,
                           xValueMapper: (d, _) => d.destinations,
                           yValueMapper: (d, _) => d.nombrePassagers,
@@ -208,11 +250,11 @@ class _GraphiquesABarresMoisAnneeState
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildDateField('Choisissez une date:', _dateController,
+          _buildDateField('Choisissez une date:', _dateAffichage,
               () => _selectDate(context)),
-          _buildDateField('Choisissez mois et année:', _monthYearController,
+          _buildDateField('Choisissez mois et année:', _moisAnneeAffichage,
               () => _selectMoisEtAnnee(context)),
-          _buildDateField('Choisissez l\'année:', _yearController,
+          _buildDateField('Choisissez l\'année:', _anneeAffichage,
               () => _selectAnnee(context)),
         ],
       ),
@@ -262,6 +304,9 @@ class _GraphiquesABarresMoisAnneeState
         _monthYearController.text =
             DateFormat('MMMM_y', 'fr_FR').format(picked);
         _yearController.text = DateFormat('y', 'fr_FR').format(picked);
+        _dateAffichage.text = _lisible(_dateController.text);
+        _moisAnneeAffichage.text = _lisible(_monthYearController.text);
+        _anneeAffichage.text = _lisible(_yearController.text);
       });
       Navigator.pushReplacement(
           context,
@@ -292,6 +337,9 @@ class _GraphiquesABarresMoisAnneeState
             DateFormat('MMMM_y', 'fr_FR').format(_selectedMonthYear);
         _yearController.text =
             DateFormat('y', 'fr_FR').format(_selectedMonthYear);
+        _dateAffichage.text = _lisible(_dateController.text);
+        _moisAnneeAffichage.text = _lisible(_monthYearController.text);
+        _anneeAffichage.text = _lisible(_yearController.text);
       });
       Navigator.pushReplacement(
           context,
@@ -321,6 +369,9 @@ class _GraphiquesABarresMoisAnneeState
         _monthYearController.text =
             DateFormat('MMMM_y', 'fr_FR').format(_selectedYear);
         _yearController.text = DateFormat('y', 'fr_FR').format(_selectedYear);
+        _dateAffichage.text = _lisible(_dateController.text);
+        _moisAnneeAffichage.text = _lisible(_monthYearController.text);
+        _anneeAffichage.text = _lisible(_yearController.text);
       });
       Navigator.pushReplacement(
           context,

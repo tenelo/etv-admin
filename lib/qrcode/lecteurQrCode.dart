@@ -2,12 +2,12 @@ import 'dart:convert';
 
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:etv_admin/config/config.dart';
 import 'package:etv_admin/mesfonctions/mesfonctions.dart';
-import 'package:socket_io_client/socket_io_client.dart' as IO;
+import 'package:etv_admin/services/api_client.dart';
+import 'package:socket_io_client_new/socket_io_client_new.dart' as IO;
 
 List<String> lecture = [];
 
@@ -33,7 +33,18 @@ class LecteurQrCode extends StatefulWidget {
 class _LecteurQrCodeState extends State<LecteurQrCode> {
   final MobileScannerController controller = MobileScannerController(
     autoStart: false,
-    detectionTimeoutMs: 500,
+    // Ne decoder que le QR : evite de tester tous les formats de
+    // code-barres a chaque frame (gain de vitesse de decodage).
+    formats: const [BarcodeFormat.qrCode],
+    // Zoom automatique sur un QR detecte de loin : evite de devoir
+    // rapprocher physiquement l'appareil.
+    autoZoom: true,
+    // Resolution plafonnee : un flux plus leger se decode plus vite
+    // qu'une haute resolution native pensee pour l'apercu.
+    cameraResolution: const Size(1280, 720),
+    // Cadence de detection ramenee au defaut package (250ms) pour plus
+    // de reactivite. N'affecte PAS le verrou anti-double-scan qrRead.
+    detectionTimeoutMs: 250,
   );
 
   bool isScanning = false;
@@ -84,10 +95,10 @@ class _LecteurQrCodeState extends State<LecteurQrCode> {
 
     // Fallback : requête directe par idUtilisateur
     try {
-      final response = await http.post(
-        apiUri('recuperation_mes_tickets.php'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'idUtilisateur': ticketData.idUtilisateur}),
+      final response = await ApiClient.instance.post(
+        'recuperation_mes_tickets.php',
+        body: {'idUtilisateur': ticketData.idUtilisateur},
+        timeout: const Duration(seconds: 5),
       );
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
@@ -186,7 +197,7 @@ class _LecteurQrCodeState extends State<LecteurQrCode> {
         children: [
           // ── Zone scanner ──────────────────────────────────────────────────
           SizedBox(
-            height: size.height * .45,
+            height: size.height * .55,
             child: Stack(
               children: [
                 Padding(
@@ -222,23 +233,38 @@ class _LecteurQrCodeState extends State<LecteurQrCode> {
                             dateDuJourFormate,
                           )) {
                             if (ticketData.etatScann == 'nonScanné') {
-                              // ── Socket d'abord → couleur change instantanément côté client
+                              // Notifier partage avec le dialog : true = ce ticket s'est revele
+                              // deja scanne selon le serveur (bascule le dialog en bleu).
+                              final dejaScanneNotifier = ValueNotifier<bool>(
+                                false,
+                              );
+
+                              // Emission socket immediate (temps reel cote client, inchange).
                               _emettreTicketScanne(ticketData);
 
                               if (!mounted) return;
+                              // Dialog VERT ouvert INSTANTANEMENT (aucune attente reseau).
                               showDialog(
                                 context: context,
                                 barrierDismissible: false,
-                                builder: (context) =>
-                                    _dialogValide(context, ticketData),
+                                builder: (context) => _dialogScanResultat(
+                                  context,
+                                  ticketData,
+                                  dejaScanneNotifier,
+                                ),
                               );
 
-                              // PHP en arrière-plan pendant que l'admin lit le dialog
+                              // POST en arriere-plan : si le serveur dit "deja_scanne", on bascule
+                              // le contenu du dialog en bleu SANS le fermer (via le notifier).
                               misAjourEtatScanne(
                                 ticketData.idTicket,
                                 ticketData.idUtilisateur,
                                 ticketData.place,
-                              );
+                              ).then((etat) {
+                                if (etat == 'deja_scanne') {
+                                  dejaScanneNotifier.value = true;
+                                }
+                              });
                             } else {
                               showDialog(
                                 context: context,
@@ -330,7 +356,7 @@ class _LecteurQrCodeState extends State<LecteurQrCode> {
 
           // ── Bouton Pause / Reprendre ──────────────────────────────────────
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 70),
+            padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 40),
             child: SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
@@ -365,7 +391,7 @@ class _LecteurQrCodeState extends State<LecteurQrCode> {
             ),
           ),
 
-          const SizedBox(height: 16),
+          const SizedBox(height: 10),
         ],
       ),
     );
@@ -373,31 +399,46 @@ class _LecteurQrCodeState extends State<LecteurQrCode> {
 
   // ── Dialogs ─────────────────────────────────────────────────────────────────
 
-  Widget _dialogValide(BuildContext context, TicketData ticketData) {
-    return AlertDialog(
-      title: _dialogTitre(
-        'assets/images/valide.png',
-        'TICKET VALIDE',
-        Colors.green,
-      ),
-      content: _buildTicketContent(ticketData, Colors.green),
-      actions: [
-        TextButton(
-          onPressed: () {
-            Navigator.pop(context);
-            setState(() => compteurScans++);
-            _continuerScan();
-          },
-          child: const Text(
-            'OK',
-            style: TextStyle(
-              color: Colors.green,
-              fontWeight: FontWeight.bold,
-              fontSize: 16,
+  Widget _dialogScanResultat(
+    BuildContext context,
+    TicketData ticketData,
+    ValueNotifier<bool> dejaScanneNotifier,
+  ) {
+    return ValueListenableBuilder<bool>(
+      valueListenable: dejaScanneNotifier,
+      builder: (context, dejaScanne, _) {
+        // dejaScanne=false -> vert "TICKET VALIDE" ; true -> bleu "DEJA SCANNE"
+        final Color couleur = dejaScanne ? Colors.blue : Colors.green;
+        final String image = dejaScanne
+            ? 'assets/images/dejaValide.png'
+            : 'assets/images/valide.png';
+        final String titre = dejaScanne ? 'DÉJÀ SCANNÉ' : 'TICKET VALIDE';
+        return AlertDialog(
+          title: _dialogTitre(image, titre, couleur),
+          content: _buildTicketContent(ticketData, couleur),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                // On n'incremente le compteur que si le ticket etait
+                // reellement valide (pas un doublon).
+                if (!dejaScanne) {
+                  setState(() => compteurScans++);
+                }
+                _continuerScan();
+              },
+              child: Text(
+                'OK',
+                style: TextStyle(
+                  color: couleur,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                ),
+              ),
             ),
-          ),
-        ),
-      ],
+          ],
+        );
+      },
     );
   }
 

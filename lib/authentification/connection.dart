@@ -2,16 +2,19 @@
 
 import 'dart:convert';
 
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:http/http.dart' as http;
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:etv_admin/authentification/authentification.dart';
 import 'package:etv_admin/config/config.dart';
 import 'package:etv_admin/main.dart';
-import 'package:etv_admin/mesfonctions/mesfonctions.dart';
 import 'package:etv_admin/mesfonctions/keyboard_notifier.dart';
 import 'package:etv_admin/authentification/clavier_numerique.dart';
+import 'package:etv_admin/authentification/pin_forgot.dart';
+import 'package:etv_admin/services/api_client.dart';
+import 'package:etv_admin/services/auth_service.dart';
+import 'package:etv_admin/services/fcm_service.dart';
+import 'package:etv_admin/services/token_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class Login extends StatefulWidget {
@@ -33,6 +36,8 @@ class _LoginState extends State<Login> {
   String _gare = '';
   String _uid = '';
   String _role = 'admin';
+  bool _peutGererNotifs = false;
+  static const FlutterSecureStorage _secureStorage = FlutterSecureStorage();
 
   @override
   void dispose() {
@@ -40,11 +45,17 @@ class _LoginState extends State<Login> {
     super.dispose();
   }
 
-  Future<void> enregistrerSession(String gare, String uid, String role) async {
+  Future<void> enregistrerSession(
+    String gare,
+    String uid,
+    String role,
+    bool peutGererNotifs,
+  ) async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     await prefs.setString('gare', gare);
     await prefs.setString('uid', uid);
     await prefs.setString('role', role);
+    await prefs.setBool('peutGererNotifs', peutGererNotifs);
   }
 
   Future<void> _continuer() async {
@@ -56,10 +67,9 @@ class _LoginState extends State<Login> {
     });
 
     try {
-      final response = await http.post(
-        apiUri('verifierAdmin.php'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'telephone': _phoneNumberController.text.trim()}),
+      final response = await ApiClient.instance.post(
+        'verifierAdmin.php',
+        body: {'telephone': _phoneNumberController.text.trim()},
       );
 
       setState(() => _isLoading = false);
@@ -127,6 +137,7 @@ class _LoginState extends State<Login> {
       _gare = data['gare'] as String? ?? '';
       _uid = data['uid'] as String? ?? '';
       _role = data['role'] as String? ?? 'admin';
+      _peutGererNotifs = data['peutGererLesNotificationsPush'] == true;
       final bool compteExiste = data['compteExiste'] == true;
 
       if (!compteExiste) {
@@ -179,12 +190,57 @@ class _LoginState extends State<Login> {
   Future<void> _seConnecter() async {
     setState(() => _isLoading = true);
     try {
-      await FirebaseAuth.instance.signInWithEmailAndPassword(
-        email: '$_telephone@gmail.com',
-        password: '${_pin}mv',
-      );
+      // Source de verite : Laravel Sanctum.
+      final response = await ApiClient.instance
+          .post('admin/login', body: {'telephone': _telephone, 'pin': _pin})
+          .timeout(const Duration(seconds: 10));
 
-      await enregistrerSession(_gare, _uid, _role);
+      final data = jsonDecode(response.body);
+
+      if (data['success'] != true) {
+        if (mounted) {
+          setState(() {
+            _erreur = data['message'] as String? ?? 'Code Secret incorrect.';
+            _pin = '';
+            _isLoading = false;
+          });
+        }
+        return;
+      }
+
+      final utilisateur = data['utilisateur'] as Map<String, dynamic>;
+
+      // Token Sanctum (future source de verite unique).
+      await TokenStorage.saveToken(data['token'] as String);
+
+      // Cles lues par AuthService.chargerDepuisStorage().
+      final nomComplet = [
+        utilisateur['nom']?.toString() ?? '',
+        utilisateur['prenoms']?.toString() ?? '',
+      ].where((s) => s.isNotEmpty).join(' ').trim();
+      await _secureStorage.write(
+        key: 'user_idUtilisateur',
+        value: utilisateur['idUtilisateur']?.toString() ?? _uid,
+      );
+      await _secureStorage.write(key: 'user_name', value: nomComplet);
+
+      // Valeurs metier issues de la reponse serveur (fallback sur celles
+      // recuperees a l'etape telephone si absentes).
+      _gare = utilisateur['gare']?.toString() ?? _gare;
+      _role = utilisateur['role']?.toString() ?? _role;
+      _uid = utilisateur['idUtilisateur']?.toString() ?? _uid;
+      _peutGererNotifs = utilisateur['peutGererLesNotificationsPush'] == true;
+
+      // Pont transition : on continue d'ecrire gare/role/uid en
+      // SharedPreferences, encore lus par main() et profil.dart tant que
+      // le Lot 1c n'a pas migre ces lectures vers AuthService.
+      await enregistrerSession(_gare, _uid, _role, _peutGererNotifs);
+
+      // Rafraichir le cache memoire d'AuthService avant navigation.
+      await AuthService.chargerDepuisStorage();
+
+      // Enregistrer le token FCM du compte fraichement connecte (best-effort).
+      await FcmService.enregistrerTokenSiConnecte();
 
       if (mounted) {
         Navigator.pushAndRemoveUntil(
@@ -192,13 +248,6 @@ class _LoginState extends State<Login> {
           MaterialPageRoute(builder: (_) => const Accueil()),
           (route) => false,
         );
-      }
-    } on FirebaseAuthException {
-      if (mounted) {
-        setState(() {
-          _erreur = 'Code Secret incorrect.';
-          _pin = '';
-        });
       }
     } catch (_) {
       if (mounted) {
@@ -410,7 +459,26 @@ class _LoginState extends State<Login> {
             colors: c,
             sw: sw,
           ),
-        SizedBox(height: sh * 0.04),
+        SizedBox(height: sh * 0.02),
+        TextButton(
+          onPressed: _isLoading
+              ? null
+              : () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const PinForgot()),
+                  );
+                },
+          child: Text(
+            'Code Secret oublié ?',
+            style: TextStyle(
+              color: c.authAccent,
+              fontSize: sw * 0.035,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        SizedBox(height: sh * 0.02),
       ],
     );
   }

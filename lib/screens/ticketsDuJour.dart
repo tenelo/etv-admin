@@ -2,12 +2,12 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:etv_admin/config/config.dart';
 import 'package:etv_admin/mesfonctions/mesfonctions.dart';
+import 'package:etv_admin/services/api_client.dart';
 import 'package:etv_admin/screens/detailsTickets.dart';
-import 'package:socket_io_client/socket_io_client.dart' as IO;
+import 'package:socket_io_client_new/socket_io_client_new.dart' as IO;
 
 class TicketsDuJour extends StatefulWidget {
   const TicketsDuJour({
@@ -91,10 +91,9 @@ class _TicketsDuJourState extends State<TicketsDuJour> {
     if (mounted) setState(() => _isLoading = true);
 
     try {
-      final response = await http.post(
-        apiUri('ticketsDuJour.php'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'documentId': widget.idDoc, 'gare': widget.gare}),
+      final response = await ApiClient.instance.post(
+        'ticketsDuJour.php',
+        body: {'documentId': widget.idDoc, 'gare': widget.gare},
       );
 
       if (response.statusCode == 200) {
@@ -137,10 +136,14 @@ class _TicketsDuJourState extends State<TicketsDuJour> {
     return Scaffold(
       appBar: AppBar(
         iconTheme: IconThemeData(color: c.authCardBackground),
+        toolbarHeight: 64,
         title: Text(
-          '${widget.gare} -> ${widget.destination} ${widget.date}',
+          '${widget.gare} -> ${widget.destination} ${widget.date.replaceAll('_', ' ')}',
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
           style: TextStyle(
-            fontSize: 12,
+            fontSize: 14,
             color: c.authCardBackground,
             fontWeight: FontWeight.bold,
           ),
@@ -162,59 +165,21 @@ class _TicketsDuJourState extends State<TicketsDuJour> {
         child: Column(
           children: [
             // ── Champs de recherche ───────────────────────────────────────
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _rechercheParDate,
-                    decoration: const InputDecoration(
-                      hintText: 'Par dates',
-                      hintMaxLines: 2,
-                      hintStyle: TextStyle(fontSize: 11),
-                      prefixIcon: Icon(Icons.search, size: 18),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.all(Radius.circular(12.0)),
-                      ),
-                      contentPadding: EdgeInsets.symmetric(vertical: 2),
-                    ),
-                    onChanged: (value) => _filtrerDonnees(),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                children: [
+                  _champRecherche(_rechercheParDate, 'Date', flex: 3),
+                  const SizedBox(width: 6),
+                  _champRecherche(
+                    _rechercheParDestination,
+                    'Destination',
+                    flex: 5,
                   ),
-                ),
-                const SizedBox(width: 4),
-                Expanded(
-                  child: TextField(
-                    controller: _rechercheParDestination,
-                    decoration: const InputDecoration(
-                      hintText: 'Par destinations',
-                      hintMaxLines: 2,
-                      hintStyle: TextStyle(fontSize: 11),
-                      prefixIcon: Icon(Icons.search, size: 18),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.all(Radius.circular(12.0)),
-                      ),
-                      contentPadding: EdgeInsets.symmetric(vertical: 2),
-                    ),
-                    onChanged: (value) => _filtrerDonnees(),
-                  ),
-                ),
-                const SizedBox(width: 4),
-                Expanded(
-                  child: TextField(
-                    controller: _rechercheParNom,
-                    decoration: const InputDecoration(
-                      hintText: 'Par noms',
-                      hintMaxLines: 2,
-                      hintStyle: TextStyle(fontSize: 11),
-                      prefixIcon: Icon(Icons.search, size: 18),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.all(Radius.circular(12.0)),
-                      ),
-                      contentPadding: EdgeInsets.symmetric(vertical: 2),
-                    ),
-                    onChanged: (value) => _filtrerDonnees(),
-                  ),
-                ),
-              ],
+                  const SizedBox(width: 6),
+                  _champRecherche(_rechercheParNom, 'Nom', flex: 3),
+                ],
+              ),
             ),
             // ── Tableau ───────────────────────────────────────────────────
             Expanded(
@@ -345,6 +310,42 @@ class _TicketsDuJourState extends State<TicketsDuJour> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _champRecherche(
+    TextEditingController controller,
+    String hint, {
+    required int flex,
+  }) {
+    return Expanded(
+      flex: flex,
+      child: TextField(
+        controller: controller,
+        style: const TextStyle(fontSize: 12),
+        decoration: InputDecoration(
+          isDense: true,
+          filled: true,
+          fillColor: Colors.white,
+          hintText: hint,
+          hintMaxLines: 1,
+          hintStyle: const TextStyle(fontSize: 11, color: Colors.grey),
+          prefixIcon: const Icon(Icons.search, size: 16, color: Colors.grey),
+          prefixIconConstraints: const BoxConstraints(
+            minWidth: 28,
+            minHeight: 20,
+          ),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10.0),
+            borderSide: BorderSide.none,
+          ),
+          contentPadding: const EdgeInsets.symmetric(
+            vertical: 8,
+            horizontal: 4,
+          ),
+        ),
+        onChanged: (value) => _filtrerDonnees(),
       ),
     );
   }

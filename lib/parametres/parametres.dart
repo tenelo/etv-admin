@@ -1,4 +1,3 @@
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:etv_admin/config/config.dart';
 import 'package:etv_admin/mesfonctions/mesfonctions.dart';
@@ -11,6 +10,7 @@ import 'package:etv_admin/parametres/infosGare.dart';
 import 'package:etv_admin/parametres/lignesStandard.dart';
 import 'package:etv_admin/screens/vip/heureDepartVip.dart';
 import 'package:etv_admin/screens/vip/lignesVip.dart';
+import 'package:etv_admin/services/auth_service.dart';
 
 const Color _vipGold = Color(0xFFFFB300);
 
@@ -322,7 +322,6 @@ class _ParametresBodyState extends State<ParametresBody> {
 // ignore: must_be_immutable
 class Parametres extends StatelessWidget {
   Parametres({super.key});
-  User? user = FirebaseAuth.instance.currentUser;
 
   @override
   Widget build(BuildContext context) {
@@ -348,7 +347,7 @@ class Parametres extends StatelessWidget {
       body: const ParametresBody(),
       persistentFooterButtons: [
         Text(
-          user?.displayName ?? '',
+          AuthService.getUtilisateur()?.displayName ?? '',
           style: TextStyle(fontFamily: 'Lobster', color: c.authCardBackground),
         ),
       ],

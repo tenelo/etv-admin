@@ -3,9 +3,8 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:etv_admin/config/config.dart';
-import 'package:etv_admin/mesfonctions/mesfonctions.dart';
+import 'package:etv_admin/services/api_client.dart';
 
 class GestionAdmins extends StatefulWidget {
   const GestionAdmins({super.key});
@@ -26,6 +25,9 @@ class _GestionAdminsState extends State<GestionAdmins> {
   bool _isLoadingListe = true;
   String? _erreur;
   String? _succes;
+  int? _permissionEnCoursId;
+  int? _permissionPushEnCoursId;
+  dynamic _permissionCarEnCoursId;
 
   @override
   void initState() {
@@ -45,7 +47,7 @@ class _GestionAdminsState extends State<GestionAdmins> {
 
   Future<void> _recupererGares() async {
     try {
-      final response = await http.get(apiUri('gares.php'));
+      final response = await ApiClient.instance.get('gares.php');
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         if (data['success'] == true && mounted) {
@@ -62,7 +64,7 @@ class _GestionAdminsState extends State<GestionAdmins> {
   Future<void> _recupererListeAdmins() async {
     setState(() => _isLoadingListe = true);
     try {
-      final response = await http.get(apiUri('listeAdmins.php'));
+      final response = await ApiClient.instance.get('listeAdmins.php');
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         if (data['success'] == true && mounted) {
@@ -89,14 +91,13 @@ class _GestionAdminsState extends State<GestionAdmins> {
     });
 
     try {
-      final response = await http.post(
-        apiUri('ajouterNumeroAdmin.php'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
+      final response = await ApiClient.instance.post(
+        'ajouterNumeroAdmin.php',
+        body: {
           'telephone': _telephoneController.text.trim(),
           'role': _roleSelectionne,
           'gare': _gareSelectionnee,
-        }),
+        },
       );
 
       if (response.statusCode == 200) {
@@ -314,15 +315,14 @@ class _GestionAdminsState extends State<GestionAdmins> {
                         }
 
                         try {
-                          final response = await http.post(
-                            apiUri('modifierNumeroAdmin.php'),
-                            headers: {'Content-Type': 'application/json'},
-                            body: jsonEncode({
+                          final response = await ApiClient.instance.post(
+                            'modifierNumeroAdmin.php',
+                            body: {
                               'id': admin['id'],
                               'telephone': telephoneCtrl.text.trim(),
                               'role': roleSelectionne,
                               'gare': gareSelectionnee,
-                            }),
+                            },
                           );
 
                           if (response.statusCode == 200) {
@@ -416,10 +416,9 @@ class _GestionAdminsState extends State<GestionAdmins> {
     if (confirmer != true) return;
 
     try {
-      final response = await http.post(
-        apiUri('supprimerNumeroAdmin.php'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'telephone': telephone}),
+      final response = await ApiClient.instance.post(
+        'supprimerNumeroAdmin.php',
+        body: {'telephone': telephone},
       );
 
       if (response.statusCode == 200) {
@@ -445,6 +444,130 @@ class _GestionAdminsState extends State<GestionAdmins> {
           ),
         );
       }
+    }
+  }
+
+  Future<void> _basculerPermissionSuggestions(
+    Map<String, dynamic> admin,
+    bool nouvelleValeur,
+  ) async {
+    final id = admin['id'];
+    setState(() => _permissionEnCoursId = id);
+    try {
+      final response = await ApiClient.instance.post(
+        'modifierPermissionSuggestions.php',
+        body: {
+          'id': id,
+          'peutGererSuggestions': nouvelleValeur,
+        },
+      );
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['success'] == true) {
+          if (mounted) {
+            setState(() => admin['peutGererSuggestions'] = nouvelleValeur);
+          }
+        } else if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              backgroundColor: Colors.red,
+              content: Text(data['message'] ?? 'Erreur inconnue.'),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            backgroundColor: Colors.red,
+            content: Text('Erreur réseau. Réessayez.'),
+          ),
+        );
+      }
+    }
+    if (mounted) setState(() => _permissionEnCoursId = null);
+  }
+
+  Future<void> _basculerPermissionNotificationsPush(
+    Map<String, dynamic> admin,
+    bool nouvelleValeur,
+  ) async {
+    final id = admin['id'];
+    setState(() => _permissionPushEnCoursId = id);
+    try {
+      final response = await ApiClient.instance.post(
+        'modifierPermissionNotificationsPush.php',
+        body: {
+          'id': id,
+          'peutGererLesNotificationsPush': nouvelleValeur,
+        },
+      );
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['success'] == true) {
+          if (mounted) {
+            setState(() => admin['peutGererLesNotificationsPush'] = nouvelleValeur);
+          }
+        } else if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              backgroundColor: Colors.red,
+              content: Text(data['message'] ?? 'Erreur inconnue.'),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            backgroundColor: Colors.red,
+            content: Text('Erreur réseau. Réessayez.'),
+          ),
+        );
+      }
+    }
+    if (mounted) setState(() => _permissionPushEnCoursId = null);
+  }
+
+  Future<void> _basculerPermissionPositionnerCar(
+    Map<String, dynamic> admin,
+    bool nouvelleValeur,
+  ) async {
+    final id = admin['id'];
+    setState(() => _permissionCarEnCoursId = id);
+    try {
+      final response = await ApiClient.instance.post(
+        'modifierPermissionPositionnerCar.php',
+        body: {
+          'id': id,
+          'peutPositionnerCar': nouvelleValeur,
+        },
+      );
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['success'] == true) {
+          if (mounted) {
+            setState(() => admin['peutPositionnerCar'] = nouvelleValeur);
+          }
+        } else if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              backgroundColor: Colors.red,
+              content: Text(data['message'] ?? 'Erreur inconnue.'),
+            ),
+          );
+        }
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(backgroundColor: Colors.red, content: Text('Erreur réseau.')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _permissionCarEnCoursId = null);
     }
   }
 
@@ -698,6 +821,10 @@ class _GestionAdminsState extends State<GestionAdmins> {
                       final bool compteExiste =
                           admin['nom'] != null &&
                           admin['nom'].toString().isNotEmpty;
+                      final bool peutGerer =
+                          admin['peutGererSuggestions'] == true;
+                      final bool eligiblePermission =
+                          compteExiste && (admin['role'] ?? 'admin') != 'superadmin';
                       return Container(
                         margin: const EdgeInsets.only(bottom: 10),
                         decoration: BoxDecoration(
@@ -705,71 +832,153 @@ class _GestionAdminsState extends State<GestionAdmins> {
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(color: c.authBorder, width: 1),
                         ),
-                        child: ListTile(
-                          leading: Icon(
-                            compteExiste ? Icons.person : Icons.person_outline,
-                            color: compteExiste ? Colors.green : c.authAccent,
-                          ),
-                          title: Text(
-                            admin['telephone'] ?? '',
-                            style: TextStyle(
-                              color: c.authTextPrimary,
-                              fontWeight: FontWeight.bold,
+                        child: Column(
+                          children: [
+                            ListTile(
+                              leading: Icon(
+                                compteExiste ? Icons.person : Icons.person_outline,
+                                color: compteExiste ? Colors.green : c.authAccent,
+                              ),
+                              title: Text(
+                                admin['telephone'] ?? '',
+                                style: TextStyle(
+                                  color: c.authTextPrimary,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              subtitle: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    '${admin['gare'] ?? ''} · ${admin['role'] ?? 'admin'}',
+                                    style: TextStyle(
+                                      color: c.authAccent,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                  if (compteExiste)
+                                    Text(
+                                      '${admin['nom'] ?? ''} ${admin['prenoms'] ?? ''}',
+                                      style: TextStyle(
+                                        color: c.authTextSecondary,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  Text(
+                                    compteExiste
+                                        ? 'Compte créé'
+                                        : 'En attente de création',
+                                    style: TextStyle(
+                                      color: compteExiste
+                                          ? Colors.green
+                                          : Colors.orange,
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              trailing: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  // Bouton modifier visible uniquement si compte pas encore créé
+                                  if (!compteExiste)
+                                    IconButton(
+                                      icon: Icon(
+                                        Icons.edit_outlined,
+                                        color: c.authAccent,
+                                      ),
+                                      onPressed: () => _modifierNumero(admin),
+                                    ),
+                                  IconButton(
+                                    icon: const Icon(
+                                      Icons.delete_outline,
+                                      color: Colors.red,
+                                    ),
+                                    onPressed: () =>
+                                        _supprimerNumero(admin['telephone'] ?? ''),
+                                  ),
+                                ],
+                              ),
                             ),
-                          ),
-                          subtitle: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                '${admin['gare'] ?? ''} · ${admin['role'] ?? 'admin'}',
-                                style: TextStyle(
-                                  color: c.authAccent,
-                                  fontSize: 12,
+                            if (eligiblePermission)
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(16, 0, 8, 8),
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.notifications_active_outlined,
+                                        color: c.authAccent, size: 18),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text('Peut gérer les suggestions',
+                                          style: TextStyle(
+                                              color: c.authTextSecondary, fontSize: 12)),
+                                    ),
+                                    _permissionEnCoursId == admin['id']
+                                        ? const SizedBox(
+                                            width: 20, height: 20,
+                                            child: CircularProgressIndicator(strokeWidth: 2))
+                                        : Switch(
+                                            value: peutGerer,
+                                            activeThumbColor: c.authAccent,
+                                            onChanged: (v) =>
+                                                _basculerPermissionSuggestions(admin, v),
+                                          ),
+                                  ],
                                 ),
                               ),
-                              if (compteExiste)
-                                Text(
-                                  '${admin['nom'] ?? ''} ${admin['prenoms'] ?? ''}',
-                                  style: TextStyle(
-                                    color: c.authTextSecondary,
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              Text(
-                                compteExiste
-                                    ? 'Compte créé'
-                                    : 'En attente de création',
-                                style: TextStyle(
-                                  color: compteExiste
-                                      ? Colors.green
-                                      : Colors.orange,
-                                  fontSize: 11,
+                            if (eligiblePermission)
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(16, 0, 8, 8),
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.campaign_outlined,
+                                        color: c.authAccent, size: 18),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text('Peut gérer les notifications push',
+                                          style: TextStyle(
+                                              color: c.authTextSecondary, fontSize: 12)),
+                                    ),
+                                    _permissionPushEnCoursId == admin['id']
+                                        ? const SizedBox(
+                                            width: 20, height: 20,
+                                            child: CircularProgressIndicator(strokeWidth: 2))
+                                        : Switch(
+                                            value: admin['peutGererLesNotificationsPush'] == true,
+                                            activeThumbColor: c.authAccent,
+                                            onChanged: (v) =>
+                                                _basculerPermissionNotificationsPush(admin, v),
+                                          ),
+                                  ],
                                 ),
                               ),
-                            ],
-                          ),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              // Bouton modifier visible uniquement si compte pas encore créé
-                              if (!compteExiste)
-                                IconButton(
-                                  icon: Icon(
-                                    Icons.edit_outlined,
-                                    color: c.authAccent,
-                                  ),
-                                  onPressed: () => _modifierNumero(admin),
+                            if (eligiblePermission)
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(16, 0, 8, 8),
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.directions_bus_outlined,
+                                        color: c.authAccent, size: 18),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text('Peut positionner un car',
+                                          style: TextStyle(
+                                              color: c.authTextSecondary, fontSize: 12)),
+                                    ),
+                                    _permissionCarEnCoursId == admin['id']
+                                        ? const SizedBox(
+                                            width: 20, height: 20,
+                                            child: CircularProgressIndicator(strokeWidth: 2))
+                                        : Switch(
+                                            value: admin['peutPositionnerCar'] == true,
+                                            activeThumbColor: c.authAccent,
+                                            onChanged: (v) =>
+                                                _basculerPermissionPositionnerCar(admin, v),
+                                          ),
+                                  ],
                                 ),
-                              IconButton(
-                                icon: const Icon(
-                                  Icons.delete_outline,
-                                  color: Colors.red,
-                                ),
-                                onPressed: () =>
-                                    _supprimerNumero(admin['telephone'] ?? ''),
                               ),
-                            ],
-                          ),
+                          ],
                         ),
                       );
                     },

@@ -1,12 +1,12 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:etv_admin/config/config.dart';
 import 'package:etv_admin/mesfonctions/mesfonctions.dart';
 import 'package:etv_admin/screens/detailsTickets.dart';
-import 'package:socket_io_client/socket_io_client.dart' as IO;
+import 'package:etv_admin/services/api_client.dart';
+import 'package:socket_io_client_new/socket_io_client_new.dart' as IO;
 
 class TicketsDuJourScannes extends StatefulWidget {
   const TicketsDuJourScannes({
@@ -123,10 +123,9 @@ class _TicketsDuJourScannesState extends State<TicketsDuJourScannes> {
       final String dateDuJour =
           DateFormat('yyyy-MM-dd').format(_dateSelectionnee);
 
-      final response = await http.post(
-        apiUri('ticketsDuJourScannes.php'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'date': dateDuJour, 'gare': widget.gare}),
+      final response = await ApiClient.instance.post(
+        'ticketsDuJourScannes.php',
+        body: {'date': dateDuJour, 'gare': widget.gare},
       );
 
       if (response.statusCode == 200) {

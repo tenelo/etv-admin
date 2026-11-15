@@ -1,15 +1,14 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:etv_admin/config/config.dart';
-import 'package:etv_admin/mesfonctions/mesfonctions.dart';
+import 'package:etv_admin/services/api_client.dart';
+import 'package:etv_admin/services/token_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:socket_io_client/socket_io_client.dart' as IO;
+import 'package:socket_io_client_new/socket_io_client_new.dart' as IO;
 
 // ── Constantes ────────────────────────────────────────────────────────────────
-const String _apiUrl     = '$baseUrl/api_suggestions.php';
 const String _prefsMasqueKey = 'suggestions_masquees';
 
 // ── Catégories ────────────────────────────────────────────────────────────────
@@ -53,6 +52,7 @@ class _Suggestion {
   final String categorie;
   final String idutilisateur;
   String statut;
+  String? reponse;
   final DateTime createdat;
 
   _Suggestion({
@@ -63,6 +63,7 @@ class _Suggestion {
     required this.categorie,
     required this.idutilisateur,
     required this.statut,
+    this.reponse,
     required this.createdat,
   });
 
@@ -74,6 +75,7 @@ class _Suggestion {
         categorie:     j['categorie']     ?? 'Autre',
         idutilisateur: j['idutilisateur'] ?? '',
         statut:        j['statut']        ?? 'en_attente',
+        reponse:       j['reponse'],
         createdat:     DateTime.tryParse(j['createdat'] ?? '') ?? DateTime.now(),
       );
 }
@@ -143,13 +145,16 @@ class _SuggestionsAdminState extends State<SuggestionsAdmin>
   Future<void> _chargerSuggestions() async {
     setState(() => _isLoading = true);
     try {
-      final uri = Uri.parse(_apiUrl).replace(queryParameters: {
+      final uri = Uri(path: 'api_suggestions.php').replace(queryParameters: {
         'action': 'get_all',
         if (_dateDebut != null) 'date_debut': DateFormat('yyyy-MM-dd').format(_dateDebut!),
         if (_dateFin   != null) 'date_fin':   DateFormat('yyyy-MM-dd').format(_dateFin!),
       });
 
-      final resp = await http.get(uri).timeout(const Duration(seconds: 10));
+      final resp = await ApiClient.instance.get(
+        uri.toString(),
+        timeout: const Duration(seconds: 10),
+      );
       if (resp.statusCode == 200) {
         final data = jsonDecode(resp.body);
         if (data['success'] == true && mounted) {
@@ -166,14 +171,19 @@ class _SuggestionsAdminState extends State<SuggestionsAdmin>
   }
 
   // ── Socket.IO ─────────────────────────────────────────────────────────────
-  void _connecterSocket() {
-    _socket = IO.io(
-      'https://etv.tenelo.cloud',
-      IO.OptionBuilder()
-          .setTransports(['websocket', 'polling'])
-          .disableAutoConnect()
-          .build(),
-    );
+  Future<void> _connecterSocket() async {
+    final token = await TokenStorage.getToken();
+    if (!mounted) return;
+
+    final Map<String, dynamic> opts = {
+      'transports': ['websocket', 'polling'],
+      'autoConnect': false,
+    };
+    if (token != null) {
+      opts['query'] = {'token': token};
+    }
+
+    _socket = IO.io('https://etv.tenelo.cloud', opts);
     _socket.connect();
 
     _socket.onConnect((_) {
@@ -200,11 +210,11 @@ class _SuggestionsAdminState extends State<SuggestionsAdmin>
   // ── Changer statut + émettre socket ──────────────────────────────────────
   Future<void> _changerStatut(_Suggestion s, String nouveauStatut) async {
     try {
-      final resp = await http.post(
-        Uri.parse(_apiUrl),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'action': 'update_statut', 'id': s.id, 'statut': nouveauStatut}),
-      ).timeout(const Duration(seconds: 8));
+      final resp = await ApiClient.instance.post(
+        'api_suggestions.php',
+        body: {'action': 'update_statut', 'id': s.id, 'statut': nouveauStatut},
+        timeout: const Duration(seconds: 8),
+      );
 
       final data = jsonDecode(resp.body);
       if (data['success'] == true) {
@@ -218,6 +228,145 @@ class _SuggestionsAdminState extends State<SuggestionsAdmin>
         });
       }
     } catch (_) {}
+  }
+
+  Future<void> _repondre(_Suggestion s) async {
+    final reponseCtrl = TextEditingController(text: s.reponse ?? '');
+    final formKey = GlobalKey<FormState>();
+    String? erreurModal;
+    bool envoi = false;
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx2, setModalState) {
+          final c = Config.colors;
+          final sw = MediaQuery.of(ctx2).size.width;
+          return Padding(
+            padding: EdgeInsets.only(bottom: MediaQuery.of(ctx2).viewInsets.bottom),
+            child: SingleChildScrollView(
+              padding: EdgeInsets.fromLTRB(sw * 0.06, 20, sw * 0.06, 20),
+              child: Form(
+                key: formKey,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      s.statut == 'traite' ? 'Modifier la réponse' : 'Répondre à la suggestion',
+                      style: TextStyle(color: c.authCardBackground, fontSize: sw * 0.045, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(s.message, style: TextStyle(color: c.authCardBackground.withValues(alpha: 0.6), fontSize: 13)),
+                    const SizedBox(height: 16),
+                    Container(
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF0F4F8),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: c.authCardBackground.withValues(alpha: 0.2), width: 1.5),
+                      ),
+                      child: TextFormField(
+                        controller: reponseCtrl,
+                        minLines: 3,
+                        maxLines: 6,
+                        cursorColor: c.authCardBackground,
+                        style: TextStyle(color: c.authCardBackground),
+                        decoration: const InputDecoration(
+                          border: InputBorder.none,
+                          hintText: 'Votre réponse au passager…',
+                          contentPadding: EdgeInsets.all(14),
+                        ),
+                        validator: (v) {
+                          if (v == null || v.trim().isEmpty) return 'Veuillez saisir une réponse';
+                          return null;
+                        },
+                      ),
+                    ),
+                    if (erreurModal != null) ...[
+                      const SizedBox(height: 10),
+                      Text(erreurModal!, style: const TextStyle(color: Colors.red, fontSize: 13)),
+                    ],
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 50,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF10B981),
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        onPressed: envoi
+                            ? null
+                            : () async {
+                                if (!formKey.currentState!.validate()) return;
+                                setModalState(() {
+                                  envoi = true;
+                                  erreurModal = null;
+                                });
+                                final texte = reponseCtrl.text.trim();
+                                try {
+                                  final resp = await ApiClient.instance.post(
+                                    'api_suggestions.php',
+                                    body: {'action': 'repondre', 'id': s.id, 'reponse': texte},
+                                    timeout: const Duration(seconds: 8),
+                                  );
+                                  final data = jsonDecode(resp.body);
+                                  if (data['success'] == true) {
+                                    if (mounted) {
+                                      setState(() {
+                                        s.reponse = texte;
+                                        s.statut = 'traite';
+                                      });
+                                      _socket.emit('rejoindre_suggestions_user', {'idutilisateur': s.idutilisateur});
+                                      _socket.emit('statut_suggestion_change', {
+                                        'id': s.id,
+                                        'statut': 'traite',
+                                        'idutilisateur': s.idutilisateur,
+                                      });
+                                    }
+                                    if (ctx.mounted) Navigator.pop(ctx);
+                                  } else {
+                                    setModalState(() {
+                                      envoi = false;
+                                      erreurModal = data['error'] ?? 'Erreur inconnue.';
+                                    });
+                                  }
+                                } catch (e) {
+                                  setModalState(() {
+                                    envoi = false;
+                                    erreurModal = 'Erreur réseau. Réessayez.';
+                                  });
+                                }
+                              },
+                        child: envoi
+                            ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5))
+                            : Text(s.statut == 'traite' ? 'Modifier' : 'Envoyer la réponse', style: const TextStyle(fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+
+    // Dispose differe apres la frame courante : evite le crash
+    // "TextEditingController used after being disposed" quand une derniere
+    // frame de rebuild du TextFormField survient pendant la fermeture du
+    // bottom sheet (cas : champ vide + retour).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      reponseCtrl.dispose();
+    });
   }
 
   // ── Supprimer (admin) ─────────────────────────────────────────────────────
@@ -245,11 +394,11 @@ class _SuggestionsAdminState extends State<SuggestionsAdmin>
     if (confirm != true || !mounted) return;
 
     try {
-      final resp = await http.post(
-        Uri.parse(_apiUrl),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'action': 'admin_delete', 'id': s.id}),
-      ).timeout(const Duration(seconds: 8));
+      final resp = await ApiClient.instance.post(
+        'api_suggestions.php',
+        body: {'action': 'admin_delete', 'id': s.id},
+        timeout: const Duration(seconds: 8),
+      );
 
       final data = jsonDecode(resp.body);
       if (data['success'] == true) {
@@ -593,6 +742,32 @@ class _SuggestionsAdminState extends State<SuggestionsAdmin>
 
           const SizedBox(height: 10),
 
+          // Réponse de l'admin (si la suggestion a été traitée)
+          if (s.reponse != null && s.reponse!.trim().isNotEmpty) ...[
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              margin: const EdgeInsets.only(bottom: 10),
+              decoration: BoxDecoration(
+                color: const Color(0xFF10B981).withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.25)),
+              ),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(children: [
+                  const Icon(Icons.reply_rounded, size: 13, color: Color(0xFF10B981)),
+                  const SizedBox(width: 5),
+                  const Text('Réponse',
+                      style: TextStyle(color: Color(0xFF10B981), fontSize: 11, fontWeight: FontWeight.w700)),
+                ]),
+                const SizedBox(height: 5),
+                Text(s.reponse!,
+                    style: TextStyle(color: c.authCardBackground.withValues(alpha: 0.8),
+                        fontSize: 12.5, height: 1.4)),
+              ]),
+            ),
+          ],
+
           // Pied : date + actions
           Row(children: [
             Icon(Icons.access_time_rounded, size: 12,
@@ -615,6 +790,7 @@ class _SuggestionsAdminState extends State<SuggestionsAdmin>
               statut: s.statut,
               onChanged: (nouveau) => _changerStatut(s, nouveau),
               onDelete: () => _supprimer(s),
+              onRepondre: () => _repondre(s),
             ),
           ]),
         ]),
@@ -736,13 +912,13 @@ class _ActionMenu extends StatelessWidget {
   final String statut;
   final void Function(String) onChanged;
   final VoidCallback onDelete;
-  const _ActionMenu({required this.statut, required this.onChanged, required this.onDelete});
+  final VoidCallback onRepondre;
+  const _ActionMenu({required this.statut, required this.onChanged, required this.onDelete, required this.onRepondre});
 
   @override
   Widget build(BuildContext context) {
     final actions = <String, String>{
       if (statut != 'lu' && statut != 'traite') 'lu': 'Marquer lu',
-      if (statut != 'traite') 'traite': 'Marquer traité',
       if (statut == 'traite' || statut == 'lu') 'en_attente': 'Remettre en attente',
     };
     if (actions.isEmpty) return const SizedBox.shrink();
@@ -751,6 +927,8 @@ class _ActionMenu extends StatelessWidget {
       onSelected: (val) {
         if (val == '__delete__') {
           onDelete();
+        } else if (val == '__repondre__') {
+          onRepondre();
         } else {
           onChanged(val);
         }
@@ -759,6 +937,15 @@ class _ActionMenu extends StatelessWidget {
           color: Config.colors.authCardBackground.withValues(alpha: 0.5)),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       itemBuilder: (_) => [
+        PopupMenuItem<String>(
+          value: '__repondre__',
+          child: Row(children: [
+            const Icon(Icons.reply_rounded, size: 16, color: Color(0xFF10B981)),
+            const SizedBox(width: 10),
+            Text(statut == 'traite' ? 'Modifier la réponse' : 'Répondre',
+                style: const TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.w600, fontSize: 13)),
+          ]),
+        ),
         ...actions.entries.map((e) {
           final info = _statuts[e.key]!;
           return PopupMenuItem<String>(

@@ -2,11 +2,11 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:etv_admin/config/config.dart';
 import 'package:etv_admin/mesfonctions/mesfonctions.dart';
 import 'package:etv_admin/screens/detailsTickets.dart';
+import 'package:etv_admin/services/api_client.dart';
 
 class TousLesTickets extends StatefulWidget {
   const TousLesTickets({
@@ -69,13 +69,12 @@ class _TousLesTicketsState extends State<TousLesTickets> {
     if (mounted) setState(() => _isLoading = true);
 
     try {
-      final response = await http.post(
-        apiUri('tableauAdmin.php'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
+      final response = await ApiClient.instance.post(
+        'tableauAdmin.php',
+        body: {
           'annee': DateFormat('y').format(_dateSelectionnee),
           'gare': widget.gare,
-        }),
+        },
       );
 
       if (response.statusCode == 200) {
@@ -149,59 +148,18 @@ class _TousLesTicketsState extends State<TousLesTickets> {
           children: [
             // ── Champs de recherche ───────────────────────────────────────
             Padding(
-              padding: const EdgeInsets.only(top: 3, left: 4, right: 4),
+              padding: const EdgeInsets.only(top: 4, left: 4, right: 4),
               child: Row(
                 children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _rechercheParDate,
-                      decoration: const InputDecoration(
-                        hintText: 'Recherche\npar date',
-                        hintMaxLines: 2,
-                        hintStyle: TextStyle(fontSize: 11),
-                        prefixIcon: Icon(Icons.search, size: 18),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.all(Radius.circular(12.0)),
-                        ),
-                        contentPadding: EdgeInsets.symmetric(vertical: 2),
-                      ),
-                      onChanged: (value) => _filtrerDonnees(),
-                    ),
+                  _champRecherche(_rechercheParDate, 'Date', flex: 3),
+                  const SizedBox(width: 6),
+                  _champRecherche(
+                    _rechercheParDestination,
+                    'Destination',
+                    flex: 5,
                   ),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: TextField(
-                      controller: _rechercheParDestination,
-                      decoration: const InputDecoration(
-                        hintText: 'Recherche\npar destination',
-                        hintMaxLines: 2,
-                        hintStyle: TextStyle(fontSize: 11),
-                        prefixIcon: Icon(Icons.search, size: 18),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.all(Radius.circular(12.0)),
-                        ),
-                        contentPadding: EdgeInsets.symmetric(vertical: 2),
-                      ),
-                      onChanged: (value) => _filtrerDonnees(),
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: TextField(
-                      controller: _rechercheParNom,
-                      decoration: const InputDecoration(
-                        hintText: 'Recherche\npar nom',
-                        hintMaxLines: 2,
-                        hintStyle: TextStyle(fontSize: 11),
-                        prefixIcon: Icon(Icons.search, size: 18),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.all(Radius.circular(12.0)),
-                        ),
-                        contentPadding: EdgeInsets.symmetric(vertical: 2),
-                      ),
-                      onChanged: (value) => _filtrerDonnees(),
-                    ),
-                  ),
+                  const SizedBox(width: 6),
+                  _champRecherche(_rechercheParNom, 'Nom', flex: 3),
                 ],
               ),
             ),
@@ -322,6 +280,42 @@ class _TousLesTicketsState extends State<TousLesTickets> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _champRecherche(
+    TextEditingController controller,
+    String hint, {
+    required int flex,
+  }) {
+    return Expanded(
+      flex: flex,
+      child: TextField(
+        controller: controller,
+        style: const TextStyle(fontSize: 12),
+        decoration: InputDecoration(
+          isDense: true,
+          filled: true,
+          fillColor: Colors.white,
+          hintText: hint,
+          hintMaxLines: 1,
+          hintStyle: const TextStyle(fontSize: 11, color: Colors.grey),
+          prefixIcon: const Icon(Icons.search, size: 16, color: Colors.grey),
+          prefixIconConstraints: const BoxConstraints(
+            minWidth: 28,
+            minHeight: 20,
+          ),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10.0),
+            borderSide: BorderSide.none,
+          ),
+          contentPadding: const EdgeInsets.symmetric(
+            vertical: 8,
+            horizontal: 4,
+          ),
+        ),
+        onChanged: (value) => _filtrerDonnees(),
       ),
     );
   }

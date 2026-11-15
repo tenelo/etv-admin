@@ -1,13 +1,13 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:etv_admin/config/config.dart';
 import 'package:etv_admin/mesfonctions/mesfonctions.dart';
+import 'package:etv_admin/services/api_client.dart';
 import 'package:etv_admin/screens/carStandard.dart';
 import 'package:etv_admin/screens/vip/carVIP.dart';
-import 'package:socket_io_client/socket_io_client.dart' as IO;
+import 'package:socket_io_client_new/socket_io_client_new.dart' as IO;
 
 class PlacesOccupees extends StatefulWidget {
   const PlacesOccupees({
@@ -80,10 +80,9 @@ class _PlacesOccupeesState extends State<PlacesOccupees> {
   Future<void> _chargerDeparts() async {
     if (mounted) setState(() => _isLoading = true);
     try {
-      final response = await http.post(
-        apiUri('departsParGare.php'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'date': _dateApi, 'gare': widget.gare}),
+      final response = await ApiClient.instance.post(
+        'departsParGare.php',
+        body: {'date': _dateApi, 'gare': widget.gare},
       );
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);

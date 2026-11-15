@@ -1,12 +1,12 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:etv_admin/config/config.dart';
 import 'package:etv_admin/mesfonctions/mesfonctions.dart';
 import 'package:etv_admin/screens/detailsTickets.dart';
-import 'package:socket_io_client/socket_io_client.dart' as IO;
+import 'package:etv_admin/services/api_client.dart';
+import 'package:socket_io_client_new/socket_io_client_new.dart' as IO;
 import 'package:ticket_material/ticket_material.dart';
 
 class TicketsScannes extends StatefulWidget {
@@ -68,10 +68,9 @@ class _TicketsScannesState extends State<TicketsScannes> {
     if (mounted) setState(() => _isLoading = true);
 
     try {
-      final response = await http.post(
-        apiUri('mesTicketsScannes.php'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'documentId': widget.documentId}),
+      final response = await ApiClient.instance.post(
+        'mesTicketsScannes.php',
+        body: {'documentId': widget.documentId},
       );
 
       if (response.statusCode == 200) {

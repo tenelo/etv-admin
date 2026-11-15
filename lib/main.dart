@@ -1,4 +1,3 @@
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
@@ -21,12 +20,23 @@ import 'package:etv_admin/screens/profil.dart';
 import 'package:etv_admin/parametres/suppression/suppression.dart';
 import 'package:etv_admin/screens/tousLesTickets.dart';
 import 'package:etv_admin/screens/suggestions_admin.dart';
+import 'package:etv_admin/screens/synthese_du_jour.dart';
+import 'package:etv_admin/screens/vue_par_depart.dart';
+import 'package:etv_admin/screens/tendances.dart';
+import 'package:etv_admin/screens/synthese_toutes_gares.dart';
+import 'package:etv_admin/screens/notifications_push.dart';
+import 'package:etv_admin/screens/positionner_car.dart';
 import 'package:etv_admin/gestionUtilisateurs/comptesBloques.dart';
 import 'package:etv_admin/gestionUtilisateurs/listeDesUtilisateurs.dart';
 import 'package:etv_admin/verifTickets/verifierticket.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:etv_admin/parametres/gestion_admins.dart';
 import 'package:etv_admin/authentification/login_wrapper.dart';
+import 'package:etv_admin/services/auth_service.dart';
+import 'package:etv_admin/services/fcm_service.dart';
+import 'package:etv_admin/services/version_check.dart';
+
+final GlobalKey<NavigatorState> navigatorKeyAdmin = GlobalKey<NavigatorState>();
 
 DateTime? dateActuelle = DateTime.now();
 
@@ -66,7 +76,6 @@ String dateDeDemainStr = DateFormat(formatLong).format(dateDeDemain);
 String dateApresDemainStr = DateFormat(formatLong).format(dateApresDemain);
 String dateDhierStr = DateFormat(formatLong).format(dateDhier);
 
-User? user;
 String? profil;
 int? tailleEcran;
 double? taille;
@@ -79,15 +88,23 @@ void main() async {
     DeviceOrientation.portraitDown,
   ]);
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  await FcmService.initialiser();
   await initializeDateFormatting('fr_FR', null);
   SharedPreferences prefs = await SharedPreferences.getInstance();
   final String gareAdmin = prefs.getString('gare') ?? '';
-  final String profilAdmin = prefs.getString('profil') ?? 'admin';
+  final String profilAdmin = await recupererRole() ?? 'admin';
   listeDesTicketsScannes = await ListesDesTickets.ticketsAscanner(
     gareAdmin,
     profilAdmin,
   );
   runApp(const MyApp());
+}
+
+/// Decide l'ecran de demarrage : token Sanctum present -> connecte.
+Future<bool> _decideDemarrage() async {
+  await AuthService.chargerDepuisStorage();
+  await FcmService.enregistrerTokenSiConnecte();
+  return AuthService.estConnecte();
 }
 
 class MyApp extends StatelessWidget {
@@ -98,6 +115,7 @@ class MyApp extends StatelessWidget {
     tailleEcran = Calcule.tailleEcran(context).round();
     return MaterialApp(
       title: 'ETV Admin',
+      navigatorKey: navigatorKeyAdmin,
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Config.colors.bleuFonce),
@@ -109,19 +127,15 @@ class MyApp extends StatelessWidget {
         GlobalCupertinoLocalizations.delegate,
       ],
       supportedLocales: const [Locale('fr', '')],
-      home: StreamBuilder<User?>(
-        stream: FirebaseAuth.instance.authStateChanges(),
+      home: FutureBuilder<bool>(
+        future: _decideDemarrage(),
         builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
+          if (!snapshot.hasData) {
             return const Scaffold(
               body: Center(child: CircularProgressIndicator()),
             );
           }
-          if (snapshot.hasData) {
-            return const Accueil();
-          } else {
-            return const LoginWrapper();
-          }
+          return snapshot.data! ? const Accueil() : const LoginWrapper();
         },
       ),
     );
@@ -141,25 +155,32 @@ class _AccueilState extends State<Accueil> with WidgetsBindingObserver {
   String? _gare;
   String? _uid;
   String? _role;
+  bool _peutGererNotifs = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) VersionCheck.verifier(context);
+    });
     WidgetsBinding.instance.addObserver(this);
     _loadUserData();
   }
 
   Future<void> _loadUserData() async {
-    final u = FirebaseAuth.instance.currentUser;
-    if (u == null) return;
-    final gare = await recupererGare(u.uid);
+    final idUtilisateur = AuthService.getUid();
+    if (idUtilisateur == null) return;
+    final gare = await recupererGare(idUtilisateur);
     final role = await recupererRole();
-    if (mounted)
+    final peutGererNotifs = await recupererPeutGererNotifs();
+    if (mounted) {
       setState(() {
-        _uid = u.uid;
+        _uid = idUtilisateur;
         _gare = gare;
         _role = role;
+        _peutGererNotifs = peutGererNotifs;
       });
+    }
   }
 
   @override
@@ -216,35 +237,70 @@ class _AccueilState extends State<Accueil> with WidgetsBindingObserver {
                   child: ListView(
                     padding: EdgeInsets.zero,
                     children: [
-                      DrawerHeader(
-                        decoration: BoxDecoration(color: c.authCardBackground),
-                        child: Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Container(
-                                width: 120.0,
-                                height: 120.0,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  border: Border.all(
-                                    color: c.jauneBlanc,
-                                    width: 2.0,
-                                  ),
+                      Container(
+                        width: double.infinity,
+                        padding: EdgeInsets.fromLTRB(
+                          10,
+                          MediaQuery.of(context).padding.top + 24,
+                          10,
+                          16,
+                        ),
+                        color: c.authCardBackground,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              width: 110.0,
+                              height: 110.0,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: c.jauneBlanc,
+                                  width: 2.0,
                                 ),
-                                child: Center(
-                                  child: Text(
-                                    'ETV',
-                                    style: TextStyle(
-                                      color: c.jauneBlanc,
-                                      fontSize: 24,
-                                      fontFamily: 'Lobster',
-                                    ),
+                              ),
+                              child: Center(
+                                child: Text(
+                                  'ETV',
+                                  style: TextStyle(
+                                    color: c.jauneBlanc,
+                                    fontSize: 20,
+                                    fontFamily: 'Lobster',
                                   ),
                                 ),
                               ),
-                            ],
-                          ),
+                            ),
+                            const SizedBox(height: 4),
+                            Center(
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Text(
+                                    AuthService.getUtilisateur()?.displayName ??
+                                        '',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      color: c.jauneBlanc,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    _role == 'superadmin'
+                                        ? 'Super Admin'
+                                        : 'Admin',
+                                    style: TextStyle(
+                                      color: c.jauneBlanc.withValues(
+                                        alpha: 0.8,
+                                      ),
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                       ListTile(
@@ -260,9 +316,8 @@ class _AccueilState extends State<Accueil> with WidgetsBindingObserver {
                           ),
                         ),
                         onTap: () async {
-                          if (FirebaseAuth.instance.currentUser != null) {
-                            String userId =
-                                FirebaseAuth.instance.currentUser!.uid;
+                          if (AuthService.estConnecte()) {
+                            String userId = AuthService.getUid() ?? '';
                             String userProfil =
                                 await recupererRole() ?? 'admin';
                             Navigator.push(
@@ -297,7 +352,7 @@ class _AccueilState extends State<Accueil> with WidgetsBindingObserver {
                           ),
                         ),
                         onTap: () {
-                          if (FirebaseAuth.instance.currentUser != null) {
+                          if (AuthService.estConnecte()) {
                             Navigator.push(
                               context,
                               MaterialPageRoute(
@@ -320,7 +375,7 @@ class _AccueilState extends State<Accueil> with WidgetsBindingObserver {
                           ),
                         ),
                         onTap: () {
-                          if (FirebaseAuth.instance.currentUser != null) {
+                          if (AuthService.estConnecte()) {
                             Navigator.push(
                               context,
                               MaterialPageRoute(
@@ -371,7 +426,7 @@ class _AccueilState extends State<Accueil> with WidgetsBindingObserver {
                           ),
                         ),
                         onTap: () {
-                          if (FirebaseAuth.instance.currentUser != null) {
+                          if (AuthService.estConnecte()) {
                             Navigator.pop(context);
                             Navigator.push(
                               context,
@@ -395,7 +450,7 @@ class _AccueilState extends State<Accueil> with WidgetsBindingObserver {
                           ),
                         ),
                         onTap: () {
-                          if (FirebaseAuth.instance.currentUser != null) {
+                          if (AuthService.estConnecte()) {
                             Navigator.pop(context);
                             Navigator.push(
                               context,
@@ -422,7 +477,7 @@ class _AccueilState extends State<Accueil> with WidgetsBindingObserver {
                           ),
                         ),
                         onTap: () {
-                          if (FirebaseAuth.instance.currentUser != null) {
+                          if (AuthService.estConnecte()) {
                             Navigator.pop(context);
                             Navigator.push(
                               context,
@@ -477,6 +532,15 @@ class _AccueilState extends State<Accueil> with WidgetsBindingObserver {
                     departsDuJour(context, setLoadingState),
                     placesOccupees(context, setLoadingState),
                     suggestions(context, setLoadingState),
+                    syntheseDuJour(context, setLoadingState),
+                    vueParDepart(context, setLoadingState),
+                    tendances(context, setLoadingState),
+                    if (_role == 'superadmin')
+                      vueSuperadmin(context, setLoadingState),
+                    if (_role == 'superadmin' || _peutGererNotifs)
+                      notificationsPush(context, setLoadingState),
+                    if (_role == 'superadmin' || _peutGererNotifs)
+                      positionnerCar(context, setLoadingState),
                   ],
                 ),
               ),
@@ -693,9 +757,8 @@ Widget scannQrCode(BuildContext ctx, Function setLoadingState) {
     icon: Icons.qr_code_scanner_outlined,
     label: 'SCANNER LES TICKETS',
     onTap: () async {
-      if (FirebaseAuth.instance.currentUser != null) {
-        user = FirebaseAuth.instance.currentUser;
-        final String _uid = user!.uid;
+      if (AuthService.estConnecte()) {
+        final String _uid = AuthService.getUid() ?? '';
         final String? _gare = await recupererGare(_uid);
         final String profilAdmin = await recupererRole() ?? 'admin';
         await ListesDesTickets.ticketsAscanner(_gare ?? '', profilAdmin);
@@ -728,9 +791,8 @@ Widget ticketsScannes(BuildContext ctx, Function setLoadingState) {
     icon: CupertinoIcons.tickets,
     label: 'TICKETS SCANNÉS',
     onTap: () async {
-      if (FirebaseAuth.instance.currentUser != null) {
-        user = FirebaseAuth.instance.currentUser;
-        final String _uid = user!.uid;
+      if (AuthService.estConnecte()) {
+        final String _uid = AuthService.getUid() ?? '';
         final String? _gare = await recupererGare(_uid);
         Navigator.push(
           ctx,
@@ -756,9 +818,8 @@ Widget graphiques(BuildContext ctx, Function setLoadingState) {
     icon: Icons.bar_chart_outlined,
     label: 'GRAPHIQUES',
     onTap: () async {
-      if (FirebaseAuth.instance.currentUser != null) {
-        user = FirebaseAuth.instance.currentUser;
-        final String _uid = user!.uid;
+      if (AuthService.estConnecte()) {
+        final String _uid = AuthService.getUid() ?? '';
         final String? _gare = await recupererGare(_uid);
         Navigator.push(
           ctx,
@@ -789,9 +850,8 @@ Widget departsDuJour(BuildContext ctx, Function setLoadingState) {
     icon: Icons.bar_chart,
     label: 'DÉPARTS DU JOUR',
     onTap: () async {
-      if (FirebaseAuth.instance.currentUser != null) {
-        user = FirebaseAuth.instance.currentUser;
-        final String _uid = user!.uid;
+      if (AuthService.estConnecte()) {
+        final String _uid = AuthService.getUid() ?? '';
         final String? _gare = await recupererGare(_uid);
         Navigator.push(
           ctx,
@@ -822,9 +882,8 @@ Widget tableau(BuildContext ctx, Function setLoadingState) {
     icon: Icons.format_list_bulleted_sharp,
     label: 'Tous les Tickets',
     onTap: () async {
-      if (FirebaseAuth.instance.currentUser != null) {
-        user = FirebaseAuth.instance.currentUser;
-        final String _uid = user!.uid;
+      if (AuthService.estConnecte()) {
+        final String _uid = AuthService.getUid() ?? '';
         final String? _gare = await recupererGare(_uid);
         Navigator.push(
           ctx,
@@ -850,9 +909,8 @@ Widget placesOccupees(BuildContext ctx, Function setLoadingState) {
     icon: Icons.event_seat,
     label: 'PLACES OCCUPÉES',
     onTap: () async {
-      if (FirebaseAuth.instance.currentUser != null) {
-        user = FirebaseAuth.instance.currentUser;
-        final String _uid = user!.uid;
+      if (AuthService.estConnecte()) {
+        final String _uid = AuthService.getUid() ?? '';
         final String? _gare = await recupererGare(_uid);
         Navigator.push(
           ctx,
@@ -883,9 +941,8 @@ Widget listePassagers(BuildContext ctx, Function setLoadingState) {
     icon: Icons.format_list_bulleted,
     label: 'LISTE DES PASSAGERS',
     onTap: () async {
-      if (FirebaseAuth.instance.currentUser != null) {
-        user = FirebaseAuth.instance.currentUser;
-        final String _uid = user!.uid;
+      if (AuthService.estConnecte()) {
+        final String _uid = AuthService.getUid() ?? '';
         final String? _gare = await recupererGare(_uid);
         Navigator.push(
           ctx,
@@ -917,7 +974,7 @@ Widget suppressionTickets(BuildContext ctx, Function setLoadingState) {
     label: 'SUPPRIMER TICKET',
     iconColor: Colors.red[300]!,
     onTap: () async {
-      if (FirebaseAuth.instance.currentUser != null) {
+      if (AuthService.estConnecte()) {
         Navigator.push(
           ctx,
           MaterialPageRoute(
@@ -946,7 +1003,7 @@ Widget listeUtilisateurs(BuildContext ctx, Function setLoadingState) {
     icon: Icons.people_alt_outlined,
     label: 'UTILISATEURS',
     onTap: () async {
-      if (FirebaseAuth.instance.currentUser != null) {
+      if (AuthService.estConnecte()) {
         Navigator.push(
           ctx,
           MaterialPageRoute(builder: (_) => const ListeDesUtilisateurs()),
@@ -969,7 +1026,7 @@ Widget comptesBloques(BuildContext ctx, Function setLoadingState) {
     label: 'COMPTES BLOQUÉS',
     iconColor: Colors.red[400]!,
     onTap: () async {
-      if (FirebaseAuth.instance.currentUser != null) {
+      if (AuthService.estConnecte()) {
         Navigator.push(
           ctx,
           MaterialPageRoute(builder: (_) => const GestionComptesBloques()),
@@ -991,10 +1048,167 @@ Widget suggestions(BuildContext ctx, Function setLoadingState) {
     icon: Icons.chat_bubble_outline_rounded,
     label: 'SUGGESTIONS',
     onTap: () async {
-      if (FirebaseAuth.instance.currentUser != null) {
+      if (AuthService.estConnecte()) {
         Navigator.push(
           ctx,
           MaterialPageRoute(builder: (_) => const SuggestionsAdmin()),
+        ).then((_) => setLoadingState(false));
+      } else {
+        Navigator.pushReplacement(
+          ctx,
+          MaterialPageRoute(builder: (_) => const Login()),
+        ).then((_) => setLoadingState(false));
+      }
+    },
+  );
+}
+
+Widget syntheseDuJour(BuildContext ctx, Function setLoadingState) {
+  return _carteMenu(
+    ctx: ctx,
+    setLoadingState: setLoadingState,
+    icon: Icons.dashboard_outlined,
+    label: 'SYNTHESE DU JOUR',
+    onTap: () async {
+      if (AuthService.estConnecte()) {
+        final String _uid = AuthService.getUid() ?? '';
+        final prefs = await SharedPreferences.getInstance();
+        String _gare = prefs.getString('gare') ?? '';
+        if (_gare.isEmpty) {
+          _gare = await recupererGare(_uid) ?? '';
+        }
+        Navigator.push(
+          ctx,
+          MaterialPageRoute(
+            builder: (_) => SyntheseDuJour(gare: _gare, uid: _uid),
+          ),
+        ).then((_) => setLoadingState(false));
+      } else {
+        Navigator.pushReplacement(
+          ctx,
+          MaterialPageRoute(builder: (_) => const Login()),
+        ).then((_) => setLoadingState(false));
+      }
+    },
+  );
+}
+
+Widget vueParDepart(BuildContext ctx, Function setLoadingState) {
+  return _carteMenu(
+    ctx: ctx,
+    setLoadingState: setLoadingState,
+    icon: Icons.event_seat_outlined,
+    label: 'VUE PAR DEPART',
+    onTap: () async {
+      if (AuthService.estConnecte()) {
+        final String _uid = AuthService.getUid() ?? '';
+        final prefs = await SharedPreferences.getInstance();
+        String _gare = prefs.getString('gare') ?? '';
+        if (_gare.isEmpty) {
+          _gare = await recupererGare(_uid) ?? '';
+        }
+        Navigator.push(
+          ctx,
+          MaterialPageRoute(
+            builder: (_) => VueParDepart(gare: _gare, uid: _uid),
+          ),
+        ).then((_) => setLoadingState(false));
+      } else {
+        Navigator.pushReplacement(
+          ctx,
+          MaterialPageRoute(builder: (_) => const Login()),
+        ).then((_) => setLoadingState(false));
+      }
+    },
+  );
+}
+
+Widget tendances(BuildContext ctx, Function setLoadingState) {
+  return _carteMenu(
+    ctx: ctx,
+    setLoadingState: setLoadingState,
+    icon: Icons.trending_up,
+    label: 'TENDANCES',
+    onTap: () async {
+      if (AuthService.estConnecte()) {
+        final String _uid = AuthService.getUid() ?? '';
+        final prefs = await SharedPreferences.getInstance();
+        String _gare = prefs.getString('gare') ?? '';
+        if (_gare.isEmpty) {
+          _gare = await recupererGare(_uid) ?? '';
+        }
+        Navigator.push(
+          ctx,
+          MaterialPageRoute(
+            builder: (_) => Tendances(gare: _gare, uid: _uid),
+          ),
+        ).then((_) => setLoadingState(false));
+      } else {
+        Navigator.pushReplacement(
+          ctx,
+          MaterialPageRoute(builder: (_) => const Login()),
+        ).then((_) => setLoadingState(false));
+      }
+    },
+  );
+}
+
+Widget vueSuperadmin(BuildContext ctx, Function setLoadingState) {
+  return _carteMenu(
+    ctx: ctx,
+    setLoadingState: setLoadingState,
+    icon: Icons.account_tree_outlined,
+    label: 'TOUTES LES GARES',
+    onTap: () async {
+      if (AuthService.estConnecte()) {
+        final String _uid = AuthService.getUid() ?? '';
+        Navigator.push(
+          ctx,
+          MaterialPageRoute(builder: (_) => SyntheseToutesGares(uid: _uid)),
+        ).then((_) => setLoadingState(false));
+      } else {
+        Navigator.pushReplacement(
+          ctx,
+          MaterialPageRoute(builder: (_) => const Login()),
+        ).then((_) => setLoadingState(false));
+      }
+    },
+  );
+}
+
+Widget notificationsPush(BuildContext ctx, Function setLoadingState) {
+  return _carteMenu(
+    ctx: ctx,
+    setLoadingState: setLoadingState,
+    icon: Icons.campaign_outlined,
+    label: 'NOTIFICATIONS',
+    onTap: () async {
+      if (AuthService.estConnecte()) {
+        Navigator.push(
+          ctx,
+          MaterialPageRoute(builder: (_) => const NotificationsPush()),
+        ).then((_) => setLoadingState(false));
+      } else {
+        Navigator.pushReplacement(
+          ctx,
+          MaterialPageRoute(builder: (_) => const Login()),
+        ).then((_) => setLoadingState(false));
+      }
+    },
+  );
+}
+
+Widget positionnerCar(BuildContext ctx, Function setLoadingState) {
+  return _carteMenu(
+    ctx: ctx,
+    setLoadingState: setLoadingState,
+    icon: Icons.directions_bus_outlined,
+    label: 'POSITIONNER UN CAR',
+    onTap: () async {
+      if (AuthService.estConnecte()) {
+        Navigator.push(
+          ctx,
+          MaterialPageRoute(builder: (_) => const PositionnerCar()),
         ).then((_) => setLoadingState(false));
       } else {
         Navigator.pushReplacement(
@@ -1019,15 +1233,19 @@ void showIncompleteFieldsSnackBar(BuildContext context) {
   );
 }
 
-void deconnexion(BuildContext context) async {
-  final FirebaseAuth _auth = FirebaseAuth.instance;
-  await _auth.signOut();
-  // si l'admin est déconecté
+Future<void> deconnexion(BuildContext context) async {
+  // Nettoyage complet : token Sanctum + identite locale + session
+  // Firebase residuelle. AuthService.deconnexion centralise tout ca
+  // (POST /logout best-effort, suppression token, purge cles, signOut).
+  await AuthService.deconnexion();
+  // Purge aussi les cles SharedPreferences propres a l'admin (gare/uid/
+  // role) encore lues par main() et profil.dart.
   await supprimerGareEtUid();
 
+  if (!context.mounted) return;
   Navigator.pushAndRemoveUntil(
     context,
-    MaterialPageRoute(builder: (BuildContext context) => const Login()),
+    MaterialPageRoute(builder: (_) => const Login()),
     (route) => false,
   );
 }
